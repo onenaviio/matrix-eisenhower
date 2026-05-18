@@ -15,6 +15,9 @@ const VALID_QUADRANTS: QuadrantId[] = ['do', 'plan', 'delegate', 'delete']
 function isValidTask(value: unknown): value is Task {
   if (typeof value !== 'object' || value === null) return false
   const t = value as Record<string, unknown>
+  // order необязателен: старые данные его не содержат. Если присутствует —
+  // должен быть числом. Финальную нормализацию делает normalizeOrders.
+  if (t.order !== undefined && typeof t.order !== 'number') return false
   return (
     typeof t.id === 'string' &&
     typeof t.title === 'string' &&
@@ -63,11 +66,17 @@ export function createTaskId(): string {
 }
 
 // Создаёт новую задачу в указанном квадранте.
-export function makeTask(title: string, quadrant: QuadrantId): Task {
+// order вычисляет вызывающий код через nextOrder (обычно — вниз списка).
+export function makeTask(
+  title: string,
+  quadrant: QuadrantId,
+  order: number
+): Task {
   return {
     id: createTaskId(),
     title: title.trim(),
     quadrant,
-    createdAt: Date.now()
+    createdAt: Date.now(),
+    order
   }
 }

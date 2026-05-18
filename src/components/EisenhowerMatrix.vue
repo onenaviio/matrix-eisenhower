@@ -28,7 +28,7 @@
           :class="{ 'quadrant--over': dragOver === q.id }"
           :style="{ '--accent': q.accent, '--ink': q.textOnAccent }"
           @click="onSurfaceClick($event, q.id)"
-          @dragover.prevent="dragOver = q.id"
+          @dragover.prevent="onQuadrantDragOver(q.id)"
           @dragleave="onDragLeave(q.id)"
           @drop.prevent="onDrop(q.id)"
         >
@@ -39,15 +39,26 @@
             </span>
           </div>
 
-          <div class="quadrant__tasks">
+          <div
+            class="quadrant__tasks"
+            @dragover.prevent.stop="onListDragOver($event, q.id)"
+            @drop.prevent.stop="onDrop(q.id)"
+          >
             <article
               v-for="task in tasksByQuadrant[q.id]"
               :key="task.id"
               class="task"
+              :data-id="task.id"
+              :class="{
+                'task--dragging': dragging === task.id,
+                'task--drop-before': dropBeforeId(q.id) === task.id,
+                'task--drop-after':
+                  dropBeforeId(q.id) === 'end' && lastTaskId(q.id) === task.id
+              }"
               draggable="true"
               @click.stop="onTaskClick($event, task)"
               @dragstart="onDragStart(task)"
-              @dragend="dragging = null"
+              @dragend="onDragEnd"
             >
               <span class="task__text">{{ task.title }}</span>
               <button
@@ -95,6 +106,11 @@ import {
   getQuadrant
 } from '@/types/task'
 import { loadTasks, makeTask, saveTasks } from '@/storage/taskStorage'
+import {
+  normalizeOrders,
+  nextOrder,
+  reorderWithinQuadrant
+} from '@/storage/ordering'
 
 interface PopoverState {
   key: string
@@ -115,11 +131,13 @@ export default defineComponent({
       tasks: [] as Task[],
       popover: null as PopoverState | null,
       dragging: null as string | null,
-      dragOver: null as QuadrantId | null
+      dragOver: null as QuadrantId | null,
+      // Позиция линии-индикатора вставки при перестановке внутри квадранта.
+      dropIndicator: null as { quadrant: QuadrantId; index: number } | null
     }
   },
   computed: {
-    // Группировка задач по квадрантам, новые — сверху.
+    // Группировка задач по квадрантам, порядок — ручной (order ↑).
     tasksByQuadrant(): Record<QuadrantId, Task[]> {
       const map: Record<QuadrantId, Task[]> = {
         do: [],
@@ -131,7 +149,7 @@ export default defineComponent({
         map[task.quadrant].push(task)
       }
       for (const id of Object.keys(map) as QuadrantId[]) {
-        map[id].sort((a, b) => b.createdAt - a.createdAt)
+        map[id].sort((a, b) => a.order - b.order)
       }
       return map
     }
@@ -146,7 +164,10 @@ export default defineComponent({
     }
   },
   created() {
-    this.tasks = loadTasks()
+    // Загрузка + разовая миграция: у старых данных нет order, normalizeOrders
+    // присваивает его по текущему видимому порядку. Watcher сразу запишет
+    // нормализованный список обратно в localStorage.
+    this.tasks = normalizeOrders(loadTasks())
   },
   methods: {
     accentOf(id: QuadrantId): string {
@@ -180,7 +201,8 @@ export default defineComponent({
     onPopoverSave(title: string) {
       if (!this.popover) return
       if (this.popover.mode === 'create') {
-        this.tasks.push(makeTask(title, this.popover.quadrant))
+        const order = nextOrder(this.tasks, this.popover.quadrant)
+        this.tasks.push(makeTask(title, this.popover.quadrant, order))
       } else if (this.popover.taskId) {
         const task = this.tasks.find((t) => t.id === this.popover?.taskId)
         if (task) task.title = title.trim()
@@ -190,7 +212,12 @@ export default defineComponent({
     onPopoverMove(quadrant: QuadrantId) {
       if (!this.popover?.taskId) return
       const task = this.tasks.find((t) => t.id === this.popover?.taskId)
-      if (task) task.quadrant = quadrant
+      if (task && task.quadrant !== quadrant) {
+        // Считаем order до смены квадранта, чтобы задача ушла вниз целевого.
+        const order = nextOrder(this.tasks, quadrant)
+        task.quadrant = quadrant
+        task.order = order
+      }
       this.popover = null
     },
     onPopoverDelete() {
@@ -204,17 +231,98 @@ export default defineComponent({
     onDragStart(task: Task) {
       this.dragging = task.id
     },
+    onDragEnd() {
+      this.dragging = null
+      this.dragOver = null
+      this.dropIndicator = null
+    },
     onDragLeave(quadrant: QuadrantId) {
       if (this.dragOver === quadrant) this.dragOver = null
     },
+    // Перетаскиваемая задача (текущий drag).
+    draggedTask(): Task | null {
+      if (!this.dragging) return null
+      return this.tasks.find((t) => t.id === this.dragging) ?? null
+    },
+    // Курсор над фоном/заголовком квадранта (вне списка задач).
+    // Позицию внутри своего квадранта считает onListDragOver — здесь
+    // обрабатываем только межквадрантную подсветку, чтобы не сбить индикатор.
+    onQuadrantDragOver(quadrant: QuadrantId) {
+      const dragged = this.draggedTask()
+      if (dragged && dragged.quadrant === quadrant) return
+      this.dragOver = quadrant
+      this.dropIndicator = null
+    },
+    // Единый обработчик на контейнере списка. Индекс вставки считается
+    // непрерывно по серединам карточек (зазоры включены — нет провала
+    // «в конец»). Индикатор — псевдоэлемент вне потока, layout не двигается.
+    onListDragOver(event: DragEvent, quadrant: QuadrantId) {
+      const dragged = this.draggedTask()
+      if (!dragged) return
+      if (dragged.quadrant !== quadrant) {
+        // Перенос из другого квадранта — подсветка, вниз целевого (onDrop).
+        this.dragOver = quadrant
+        this.dropIndicator = null
+        return
+      }
+      this.dragOver = null
+      const container = event.currentTarget as HTMLElement
+      const cards = Array.from(
+        container.querySelectorAll<HTMLElement>('.task')
+      )
+      // index в терминах усечённого списка (без перетаскиваемой задачи):
+      // сколько чужих карточек, чья середина выше курсора.
+      let index = 0
+      for (const el of cards) {
+        if (el.dataset.id === this.dragging) continue
+        const rect = el.getBoundingClientRect()
+        if (event.clientY < rect.top + rect.height / 2) break
+        index++
+      }
+      this.dropIndicator = { quadrant, index }
+    },
+    // id задачи, ПЕРЕД которой рисуется индикатор, либо 'end', либо null.
+    dropBeforeId(quadrant: QuadrantId): string | 'end' | null {
+      const ind = this.dropIndicator
+      if (!ind || ind.quadrant !== quadrant || !this.dragging) return null
+      const trimmed = this.tasksByQuadrant[quadrant].filter(
+        (t) => t.id !== this.dragging
+      )
+      if (ind.index >= trimmed.length) return 'end'
+      return trimmed[ind.index].id
+    },
+    // id последней карточки квадранта без перетаскиваемой — на неё вешаем
+    // индикатор «в конец» (никогда не на приглушённую перетаскиваемую).
+    lastTaskId(quadrant: QuadrantId): string | null {
+      const list = this.tasksByQuadrant[quadrant].filter(
+        (t) => t.id !== this.dragging
+      )
+      return list.length ? list[list.length - 1].id : null
+    },
     onDrop(quadrant: QuadrantId) {
       const id = this.dragging
+      const indicator = this.dropIndicator
       this.dragOver = null
       this.dragging = null
+      this.dropIndicator = null
       if (!id) return
       const task = this.tasks.find((t) => t.id === id)
-      if (task && task.quadrant !== quadrant) {
+      if (!task) return
+      if (task.quadrant === quadrant) {
+        // Перестановка внутри квадранта по позиции индикатора.
+        if (indicator && indicator.quadrant === quadrant) {
+          this.tasks = reorderWithinQuadrant(
+            this.tasks,
+            quadrant,
+            id,
+            indicator.index
+          )
+        }
+      } else {
+        // Перенос между квадрантами — вниз целевого квадранта.
+        const order = nextOrder(this.tasks, quadrant)
         task.quadrant = quadrant
+        task.order = order
       }
     }
   }
@@ -367,6 +475,7 @@ export default defineComponent({
 }
 
 .task {
+  position: relative;
   display: flex;
   align-items: flex-start;
   gap: 8px;
@@ -385,6 +494,34 @@ export default defineComponent({
 
 .task:active {
   cursor: grabbing;
+}
+
+.task--dragging {
+  opacity: 0.4;
+}
+
+/* Линия-индикатор вставки. Абсолютный псевдоэлемент в 8px-зазоре —
+   не занимает место в потоке, поэтому карточки не дёргаются, и
+   pointer-events:none — не перехватывает события dragover. */
+.task--drop-before::before,
+.task--drop-after::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 999px;
+  box-shadow: 0 0 6px rgba(15, 42, 45, 0.3);
+  pointer-events: none;
+}
+
+.task--drop-before::before {
+  top: -5px;
+}
+
+.task--drop-after::after {
+  bottom: -5px;
 }
 
 .task__text {
