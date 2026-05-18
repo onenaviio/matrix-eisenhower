@@ -9,6 +9,9 @@ export interface Task {
   title: string
   quadrant: QuadrantId
   createdAt: number
+  // Порядковый индекс внутри своего квадранта: 0, 1, 2 …
+  // 0 — верх списка (высший приоритет).
+  order: number
 }
 
 // Описание квадранта для отрисовки сетки.
