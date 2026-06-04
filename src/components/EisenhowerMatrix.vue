@@ -1,6 +1,7 @@
 <template>
   <div class="page">
     <header class="page__head">
+      <img class="page__logo" src="@/assets/logo.png" alt="Матрица Эйзенхауэра" />
       <h1 class="page__title">Матрица Эйзенхауэра</h1>
       <p class="page__subtitle">
         Кликните по любой области, чтобы добавить задачу. Перетаскивайте
@@ -344,6 +345,15 @@ export default defineComponent({
   margin-bottom: 22px;
 }
 
+.page__logo {
+  display: block;
+  width: 72px;
+  height: 72px;
+  margin: 0 auto 10px;
+  object-fit: contain;
+  filter: drop-shadow(0 6px 16px rgba(15, 42, 45, 0.18));
+}
+
 .page__title {
   margin: 0;
   font-size: 30px;
@@ -574,6 +584,11 @@ export default defineComponent({
 
   .page__title {
     font-size: 24px;
+  }
+
+  .page__logo {
+    width: 56px;
+    height: 56px;
   }
 }
 </style>
