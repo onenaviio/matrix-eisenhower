@@ -61,6 +61,63 @@
               @dragstart="onDragStart(task)"
               @dragend="onDragEnd"
             >
+              <span
+                v-if="isUrgent(q.id)"
+                class="task__age"
+                :class="`task__age--${taskAgeLevel(task)}`"
+                :title="`висит ${taskAgeLabel(task)}`"
+              >
+                <!-- Иконка по статусу: часы → песочные часы → огонь. -->
+                <svg
+                  v-if="taskAgeLevel(task) === 'fresh'"
+                  class="task__age-icon"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2.2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <circle cx="12" cy="12" r="9" />
+                  <path d="M12 7.5V12l3 2" />
+                </svg>
+                <svg
+                  v-else-if="taskAgeLevel(task) === 'warning'"
+                  class="task__age-icon"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2.2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M6 3h12M6 21h12" />
+                  <path
+                    d="M7 3v3.2a2 2 0 0 0 .6 1.4L12 12l4.4-4.4A2 2 0 0 0 17 6.2V3"
+                  />
+                  <path
+                    d="M7 21v-3.2a2 2 0 0 1 .6-1.4L12 12l4.4 4.4a2 2 0 0 1 .6 1.4V21"
+                  />
+                </svg>
+                <svg
+                  v-else
+                  class="task__age-icon"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2.2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M8.5 14.5A2.5 2.5 0 0 0 11 17a2.5 2.5 0 0 0 2.5-2.5c0-1.4-.5-2-1-3-1.1-2.1-.2-4 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.2.4-2.3 1-3a2.5 2.5 0 0 0 2.5 2.5z"
+                  />
+                </svg>
+                <span class="task__age-label">{{ taskAgeShort(task) }}</span>
+              </span>
               <span class="task__text">{{ task.title }}</span>
               <button
                 class="task__remove"
@@ -112,6 +169,13 @@ import {
   nextOrder,
   reorderWithinQuadrant
 } from '@/storage/ordering'
+import {
+  taskAge,
+  ageLevel,
+  formatDuration,
+  formatDurationShort,
+  AgeLevel
+} from '@/storage/taskAge'
 
 interface PopoverState {
   key: string
@@ -134,7 +198,11 @@ export default defineComponent({
       dragging: null as string | null,
       dragOver: null as QuadrantId | null,
       // Позиция линии-индикатора вставки при перестановке внутри квадранта.
-      dropIndicator: null as { quadrant: QuadrantId; index: number } | null
+      dropIndicator: null as { quadrant: QuadrantId; index: number } | null,
+      // Текущее время для пересчёта возраста задач; тикает раз в минуту.
+      now: Date.now(),
+      // id интервала-таймера, чтобы очистить его при размонтировании.
+      ageTimer: 0
     }
   },
   computed: {
@@ -170,9 +238,34 @@ export default defineComponent({
     // нормализованный список обратно в localStorage.
     this.tasks = normalizeOrders(loadTasks())
   },
+  mounted() {
+    // Раз в минуту двигаем now — возраст и цвет индикаторов пересчитываются.
+    this.ageTimer = window.setInterval(() => {
+      this.now = Date.now()
+    }, 60000)
+  },
+  beforeUnmount() {
+    window.clearInterval(this.ageTimer)
+  },
   methods: {
     accentOf(id: QuadrantId): string {
       return getQuadrant(id).accent
+    },
+    // Срочный ли квадрант — индикатор показываем только в срочной колонке.
+    isUrgent(quadrant: QuadrantId): boolean {
+      return getQuadrant(quadrant).urgency === 'urgent'
+    },
+    // Уровень индикатора (цвет) для задачи на текущий момент now.
+    taskAgeLevel(task: Task): AgeLevel {
+      return ageLevel(taskAge(task.createdAt, this.now))
+    },
+    // Полная длительность ожидания — для нативного title карточки.
+    taskAgeLabel(task: Task): string {
+      return formatDuration(taskAge(task.createdAt, this.now))
+    },
+    // Компактная длительность — видимый текст пилюли-индикатора.
+    taskAgeShort(task: Task): string {
+      return formatDurationShort(taskAge(task.createdAt, this.now))
     },
     // Клик по фону квадранта — создание новой задачи в точке клика.
     onSurfaceClick(event: MouseEvent, quadrant: QuadrantId) {
@@ -557,6 +650,64 @@ export default defineComponent({
 .task__remove:hover {
   color: #c0473b;
   background: rgba(192, 71, 59, 0.12);
+}
+
+/* Пилюля-индикатор возраста срочной задачи: иконка + длительность.
+   Видна всегда (без всплывающего тултипа), поэтому не обрезается
+   overflow родительских контейнеров. Цвет несёт статус. */
+.task__age {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 1px;
+  padding: 3px 8px 3px 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  cursor: help;
+}
+
+.task__age-icon {
+  width: 13px;
+  height: 13px;
+  flex: none;
+}
+
+.task__age--fresh {
+  color: #1f7a3d;
+  background: rgba(47, 170, 85, 0.14);
+}
+
+.task__age--warning {
+  color: #946800;
+  background: rgba(224, 163, 0, 0.16);
+}
+
+.task__age--stale {
+  color: #c0392b;
+  background: rgba(210, 64, 47, 0.13);
+  /* Просроченные задачи мягко пульсируют, привлекая внимание. */
+  animation: age-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes age-pulse {
+  0%,
+  100% {
+    background: rgba(210, 64, 47, 0.13);
+  }
+  50% {
+    background: rgba(210, 64, 47, 0.26);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .task__age--stale {
+    animation: none;
+  }
 }
 
 .quadrant__empty {
