@@ -65,8 +65,58 @@
                 v-if="isUrgent(q.id)"
                 class="task__age"
                 :class="`task__age--${taskAgeLevel(task)}`"
+                :title="`висит ${taskAgeLabel(task)}`"
               >
-                <span class="task__age-tip">висит {{ taskAgeLabel(task) }}</span>
+                <!-- Иконка по статусу: часы → песочные часы → огонь. -->
+                <svg
+                  v-if="taskAgeLevel(task) === 'fresh'"
+                  class="task__age-icon"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2.2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <circle cx="12" cy="12" r="9" />
+                  <path d="M12 7.5V12l3 2" />
+                </svg>
+                <svg
+                  v-else-if="taskAgeLevel(task) === 'warning'"
+                  class="task__age-icon"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2.2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M6 3h12M6 21h12" />
+                  <path
+                    d="M7 3v3.2a2 2 0 0 0 .6 1.4L12 12l4.4-4.4A2 2 0 0 0 17 6.2V3"
+                  />
+                  <path
+                    d="M7 21v-3.2a2 2 0 0 1 .6-1.4L12 12l4.4 4.4a2 2 0 0 1 .6 1.4V21"
+                  />
+                </svg>
+                <svg
+                  v-else
+                  class="task__age-icon"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2.2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M8.5 14.5A2.5 2.5 0 0 0 11 17a2.5 2.5 0 0 0 2.5-2.5c0-1.4-.5-2-1-3-1.1-2.1-.2-4 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.2.4-2.3 1-3a2.5 2.5 0 0 0 2.5 2.5z"
+                  />
+                </svg>
+                <span class="task__age-label">{{ taskAgeShort(task) }}</span>
               </span>
               <span class="task__text">{{ task.title }}</span>
               <button
@@ -123,6 +173,7 @@ import {
   taskAge,
   ageLevel,
   formatDuration,
+  formatDurationShort,
   AgeLevel
 } from '@/storage/taskAge'
 
@@ -208,9 +259,13 @@ export default defineComponent({
     taskAgeLevel(task: Task): AgeLevel {
       return ageLevel(taskAge(task.createdAt, this.now))
     },
-    // Подпись тултипа: длительность ожидания задачи.
+    // Полная длительность ожидания — для нативного title карточки.
     taskAgeLabel(task: Task): string {
       return formatDuration(taskAge(task.createdAt, this.now))
+    },
+    // Компактная длительность — видимый текст пилюли-индикатора.
+    taskAgeShort(task: Task): string {
+      return formatDurationShort(taskAge(task.createdAt, this.now))
     },
     // Клик по фону квадранта — создание новой задачи в точке клика.
     onSurfaceClick(event: MouseEvent, quadrant: QuadrantId) {
@@ -597,52 +652,62 @@ export default defineComponent({
   background: rgba(192, 71, 59, 0.12);
 }
 
-/* Кружок-индикатор возраста срочной задачи. */
+/* Пилюля-индикатор возраста срочной задачи: иконка + длительность.
+   Видна всегда (без всплывающего тултипа), поэтому не обрезается
+   overflow родительских контейнеров. Цвет несёт статус. */
 .task__age {
-  position: relative;
   flex: none;
-  width: 10px;
-  height: 10px;
-  margin-top: 4px;
-  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 1px;
+  padding: 3px 8px 3px 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
   cursor: help;
 }
 
+.task__age-icon {
+  width: 13px;
+  height: 13px;
+  flex: none;
+}
+
 .task__age--fresh {
-  background: #2faa55;
+  color: #1f7a3d;
+  background: rgba(47, 170, 85, 0.14);
 }
 
 .task__age--warning {
-  background: #e0a300;
+  color: #946800;
+  background: rgba(224, 163, 0, 0.16);
 }
 
 .task__age--stale {
-  background: #d2402f;
+  color: #c0392b;
+  background: rgba(210, 64, 47, 0.13);
+  /* Просроченные задачи мягко пульсируют, привлекая внимание. */
+  animation: age-pulse 1.8s ease-in-out infinite;
 }
 
-/* Кастомный тултип над кружком, появляется на hover. */
-.task__age-tip {
-  position: absolute;
-  bottom: calc(100% + 6px);
-  /* Привязка левым краем к кружку: тултип растёт вправо (внутрь карточки),
-     а не центрируется — иначе у левого края квадранта (overflow: hidden)
-     обрезается начало текста. */
-  left: -2px;
-  white-space: nowrap;
-  background: #16323a;
-  color: #fff;
-  font-size: 12px;
-  line-height: 1;
-  padding: 5px 8px;
-  border-radius: 6px;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.12s ease;
-  z-index: 5;
+@keyframes age-pulse {
+  0%,
+  100% {
+    background: rgba(210, 64, 47, 0.13);
+  }
+  50% {
+    background: rgba(210, 64, 47, 0.26);
+  }
 }
 
-.task__age:hover .task__age-tip {
-  opacity: 1;
+@media (prefers-reduced-motion: reduce) {
+  .task__age--stale {
+    animation: none;
+  }
 }
 
 .quadrant__empty {

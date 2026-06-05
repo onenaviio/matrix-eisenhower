@@ -23,10 +23,22 @@ export function ageLevel(ageMs: number): AgeLevel {
 }
 
 // Человекочитаемая длительность: «5 ч 12 мин» / «42 мин».
+// Используется для полного значения (нативный title карточки).
 export function formatDuration(ageMs: number): string {
   const totalMin = Math.floor(ageMs / 60000)
   const hours = Math.floor(totalMin / 60)
   const minutes = totalMin % 60
   if (hours === 0) return `${minutes} мин`
   return `${hours} ч ${minutes} мин`
+}
+
+// Компактная длительность для пилюли-индикатора: «5 ч 12 м» / «9 ч» / «42 мин».
+// Короче formatDuration, чтобы умещаться в узкой карточке рядом с текстом.
+export function formatDurationShort(ageMs: number): string {
+  const totalMin = Math.floor(ageMs / 60000)
+  const hours = Math.floor(totalMin / 60)
+  const minutes = totalMin % 60
+  if (hours === 0) return `${minutes} мин`
+  if (minutes === 0) return `${hours} ч`
+  return `${hours} ч ${minutes} м`
 }
