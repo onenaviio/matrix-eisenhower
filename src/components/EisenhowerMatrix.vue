@@ -624,8 +624,10 @@ export default defineComponent({
 .task__age-tip {
   position: absolute;
   bottom: calc(100% + 6px);
-  left: 50%;
-  transform: translateX(-50%);
+  /* Привязка левым краем к кружку: тултип растёт вправо (внутрь карточки),
+     а не центрируется — иначе у левого края квадранта (overflow: hidden)
+     обрезается начало текста. */
+  left: -2px;
   white-space: nowrap;
   background: #16323a;
   color: #fff;
