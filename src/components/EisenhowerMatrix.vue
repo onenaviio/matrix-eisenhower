@@ -61,6 +61,13 @@
               @dragstart="onDragStart(task)"
               @dragend="onDragEnd"
             >
+              <span
+                v-if="isUrgent(q.id)"
+                class="task__age"
+                :class="`task__age--${taskAgeLevel(task)}`"
+              >
+                <span class="task__age-tip">висит {{ taskAgeLabel(task) }}</span>
+              </span>
               <span class="task__text">{{ task.title }}</span>
               <button
                 class="task__remove"
@@ -112,6 +119,12 @@ import {
   nextOrder,
   reorderWithinQuadrant
 } from '@/storage/ordering'
+import {
+  taskAge,
+  ageLevel,
+  formatDuration,
+  AgeLevel
+} from '@/storage/taskAge'
 
 interface PopoverState {
   key: string
@@ -134,7 +147,11 @@ export default defineComponent({
       dragging: null as string | null,
       dragOver: null as QuadrantId | null,
       // Позиция линии-индикатора вставки при перестановке внутри квадранта.
-      dropIndicator: null as { quadrant: QuadrantId; index: number } | null
+      dropIndicator: null as { quadrant: QuadrantId; index: number } | null,
+      // Текущее время для пересчёта возраста задач; тикает раз в минуту.
+      now: Date.now(),
+      // id интервала-таймера, чтобы очистить его при размонтировании.
+      ageTimer: 0
     }
   },
   computed: {
@@ -170,9 +187,30 @@ export default defineComponent({
     // нормализованный список обратно в localStorage.
     this.tasks = normalizeOrders(loadTasks())
   },
+  mounted() {
+    // Раз в минуту двигаем now — возраст и цвет индикаторов пересчитываются.
+    this.ageTimer = window.setInterval(() => {
+      this.now = Date.now()
+    }, 60000)
+  },
+  beforeUnmount() {
+    window.clearInterval(this.ageTimer)
+  },
   methods: {
     accentOf(id: QuadrantId): string {
       return getQuadrant(id).accent
+    },
+    // Срочный ли квадрант — индикатор показываем только в срочной колонке.
+    isUrgent(quadrant: QuadrantId): boolean {
+      return getQuadrant(quadrant).urgency === 'urgent'
+    },
+    // Уровень индикатора (цвет) для задачи на текущий момент now.
+    taskAgeLevel(task: Task): AgeLevel {
+      return ageLevel(taskAge(task.createdAt, this.now))
+    },
+    // Подпись тултипа: длительность ожидания задачи.
+    taskAgeLabel(task: Task): string {
+      return formatDuration(taskAge(task.createdAt, this.now))
     },
     // Клик по фону квадранта — создание новой задачи в точке клика.
     onSurfaceClick(event: MouseEvent, quadrant: QuadrantId) {
@@ -557,6 +595,52 @@ export default defineComponent({
 .task__remove:hover {
   color: #c0473b;
   background: rgba(192, 71, 59, 0.12);
+}
+
+/* Кружок-индикатор возраста срочной задачи. */
+.task__age {
+  position: relative;
+  flex: none;
+  width: 10px;
+  height: 10px;
+  margin-top: 4px;
+  border-radius: 50%;
+  cursor: help;
+}
+
+.task__age--fresh {
+  background: #2faa55;
+}
+
+.task__age--warning {
+  background: #e0a300;
+}
+
+.task__age--stale {
+  background: #d2402f;
+}
+
+/* Кастомный тултип над кружком, появляется на hover. */
+.task__age-tip {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  background: #16323a;
+  color: #fff;
+  font-size: 12px;
+  line-height: 1;
+  padding: 5px 8px;
+  border-radius: 6px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+  z-index: 5;
+}
+
+.task__age:hover .task__age-tip {
+  opacity: 1;
 }
 
 .quadrant__empty {
