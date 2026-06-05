@@ -18,12 +18,25 @@ function isValidTask(value: unknown): value is Task {
   // order необязателен: старые данные его не содержат. Если присутствует —
   // должен быть числом. Финальную нормализацию делает normalizeOrders.
   if (t.order !== undefined && typeof t.order !== 'number') return false
+  // createdAt не проверяем строго: записи старше фичи «возраста» (или
+  // импортированные извне) таймстампа не содержат. Отсутствующий/битый
+  // createdAt подставляет withCreatedAt при чтении — задачу не теряем.
   return (
     typeof t.id === 'string' &&
     typeof t.title === 'string' &&
-    typeof t.createdAt === 'number' &&
     typeof t.quadrant === 'string' &&
     VALID_QUADRANTS.includes(t.quadrant as QuadrantId)
+  )
+}
+
+// Гарантирует валидный createdAt у каждой задачи: записи без таймстампа
+// (созданные до появления фичи «возраста» или импортированные) либо с битым
+// значением получают текущее время. Без этого normalizeOrders (сортировка по
+// createdAt) и индикатор возраста получили бы NaN. Number.isFinite сам
+// отсекает undefined/NaN/Infinity/нечисловые значения без приведения типов.
+function withCreatedAt(tasks: Task[]): Task[] {
+  return tasks.map((t) =>
+    Number.isFinite(t.createdAt) ? t : { ...t, createdAt: Date.now() }
   )
 }
 
@@ -35,7 +48,7 @@ export function loadTasks(): Task[] {
     if (!raw) return []
     const parsed = JSON.parse(raw) as Partial<StoredState>
     if (!parsed || !Array.isArray(parsed.tasks)) return []
-    return parsed.tasks.filter(isValidTask)
+    return withCreatedAt(parsed.tasks.filter(isValidTask))
   } catch (error) {
     console.warn('Не удалось прочитать задачи из localStorage:', error)
     return []
